@@ -2,7 +2,7 @@
 
 use crate::http::{HttpRequest, HttpResponse, ParseError, StatusCode};
 use std::convert::TryFrom;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::TcpListener;
 
 pub trait Hander {
