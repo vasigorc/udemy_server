@@ -46,12 +46,9 @@ impl<'buf> TryFrom<&'buf [u8]> for HttpRequest<'buf> {
 }
 
 fn get_next_word(request: &str) -> Option<(&str, &str)> {
-    for (i, c) in request.chars().enumerate() {
-        if c == ' ' || c == '\r' {
-            return Some((&request[..i], &request[i + 1..]));
-        }
-    }
-    None
+    request
+        .find(|ch| ch == ' ' || ch == '\r')
+        .map(|matched_index| (&request[..matched_index], &request[matched_index + 1..]))
 }
 
 pub enum ParseError {
