@@ -1,4 +1,6 @@
-use std::io::{Write, Result as IoResult};
+use std::io::{Result as IoResult, Write};
+
+use crate::http::request::HTTP1;
 
 use super::StatusCode;
 
@@ -30,7 +32,8 @@ impl HttpResponse {
         };
         write!(
             stream,
-            "HTTP/1.1 {} {}\r\n\r\n{}",
+            "{} {} {}\r\n\r\n{}",
+            HTTP1,
             self.status_code,
             self.status_code.reason_phrase(),
             body
