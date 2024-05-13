@@ -1,5 +1,5 @@
 use server::Server;
-use std::{env, default};
+use std::env;
 use website_handler::WebsiteHandler;
 
 mod server;

@@ -16,6 +16,6 @@ To run this server:
 ## Devoir
 
 - [X] Fix a bug where local css file's contents are read into the response header
-- [ ] Look at parts of the code to make them more functional
+- [X] Look at parts of the code to make them more functional
 - [ ] Add HttpHeaders to both `HttpRequest` and `HttpResponse`
 - [ ] Use [Tokio library](tokio.rs) + native `async`/ to convert the single core server into an async multithreaded server
