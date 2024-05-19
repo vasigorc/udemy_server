@@ -2,8 +2,8 @@ use server::Server;
 use std::env;
 use website_handler::WebsiteHandler;
 
-mod server;
 mod http;
+mod server;
 mod website_handler;
 
 fn main() {
