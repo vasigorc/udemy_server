@@ -1,5 +1,8 @@
 use derive_new::new;
+use paste::paste;
 use std::collections::HashMap;
+
+use super::HttpRequest;
 
 #[derive(Debug, new)]
 pub struct HttpHeader {
@@ -106,15 +109,59 @@ impl AsRef<str> for HttpResponseHeaderKey {
 
 #[derive(new)]
 pub struct HttpRequestHeaderBuilder {
+    #[new(default)]
     headers: HashMap<String, String>,
 }
 
+macro_rules! add_request_builder_headers {
+    ($($variant:ident), * $(,)?) => {
+        $(
+            paste! {
+                pub fn [<$variant:snake>](mut self, value: &str) -> Self {
+                    self.headers.insert(
+                        HttpRequestHeaderKey::$variant.as_ref().to_string(),
+                        value.to_string(),
+                    );
+                    self
+                }
+            }
+        )*
+
+        pub fn custom(mut self, key: String, value: &str) -> Self {
+            self.headers.insert(
+                HttpRequestHeaderKey::Custom(key).as_ref().to_string(),
+                value.to_string()
+            );
+            self
+        }
+    };
+}
+
 impl HttpRequestHeaderBuilder {
-    pub fn host(mut self, value: &str) -> Self {
-        self.headers.insert(
-            HttpRequestHeaderKey::Host.as_ref().to_string(),
-            value.to_string(),
-        );
-        self
+    add_request_builder_headers!(
+        Host,
+        UserAgent,
+        Accept,
+        AcceptLanguage,
+        AcceptEncoding,
+        Connection,
+        CacheControl,
+        KeepAlive
+    );
+
+    fn build(self) -> HttpHeader {
+        HttpHeader::new(self.headers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use rstest::*;
+
+    #[rstest]
+    fn can_build_request_header() {
+        let builder = HttpRequestHeaderBuilder::new().host("localhost");
     }
 }
