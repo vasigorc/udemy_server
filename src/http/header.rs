@@ -1,8 +1,7 @@
 use derive_new::new;
+use header_key_derive::HeaderKey;
 use paste::paste;
 use std::collections::HashMap;
-
-use super::HttpRequest;
 
 #[derive(Debug, new)]
 pub struct HttpHeader {
@@ -53,7 +52,7 @@ impl<'a> IntoIterator for &'a mut HttpHeader {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, HeaderKey)]
 pub enum HttpRequestHeaderKey {
   Accept,
   AcceptEncoding,
@@ -70,51 +69,6 @@ pub enum HttpRequestHeaderKey {
   UserAgent,
 }
 
-impl AsRef<str> for HttpRequestHeaderKey {
-  fn as_ref(&self) -> &str {
-    match self {
-      HttpRequestHeaderKey::Accept => "Accept",
-      HttpRequestHeaderKey::AcceptEncoding => "Accept-Encoding",
-      HttpRequestHeaderKey::AcceptLanguage => "Accept-Language",
-      HttpRequestHeaderKey::Authorization => "Authorization",
-      HttpRequestHeaderKey::Host => "Host",
-      HttpRequestHeaderKey::CacheControl => "Cache-Control",
-      HttpRequestHeaderKey::ContentType => "Content-Type",
-      HttpRequestHeaderKey::ContentLength => "Content-Length",
-      HttpRequestHeaderKey::Cookie => "Cookie",
-      HttpRequestHeaderKey::Custom(ref name) => name,
-      HttpRequestHeaderKey::Origin => "Origin",
-      HttpRequestHeaderKey::Referer => "Referer",
-      HttpRequestHeaderKey::UserAgent => "User-Agent",
-    }
-  }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum HttpResponseHeaderKey {
-  ContentType,
-  ContentLength,
-  KeepAlive,
-  AccessControlAllowOrigin,
-  Connection,
-  LastModified,
-  Custom(String),
-}
-
-impl AsRef<str> for HttpResponseHeaderKey {
-  fn as_ref(&self) -> &str {
-    match self {
-      HttpResponseHeaderKey::ContentType => "Content-Type",
-      HttpResponseHeaderKey::ContentLength => "Content-Length",
-      HttpResponseHeaderKey::KeepAlive => "Keep-Alive",
-      HttpResponseHeaderKey::AccessControlAllowOrigin => "Access-Control-Allow-Origin",
-      HttpResponseHeaderKey::Connection => "Connection",
-      HttpResponseHeaderKey::LastModified => "Last-Modified",
-      HttpResponseHeaderKey::Custom(ref name) => name,
-    }
-  }
-}
-
 #[derive(new)]
 pub struct HttpRequestHeaderBuilder {
   #[new(default)]
@@ -123,27 +77,27 @@ pub struct HttpRequestHeaderBuilder {
 
 macro_rules! add_request_builder_headers {
     ($($variant:ident), * $(,)?) => {
-        $(
-            paste! {
-                pub fn [<$variant:snake>](mut self, value: &str) -> Self {
-                    self.headers.insert(
-                        HttpRequestHeaderKey::$variant.as_ref().to_string(),
-                        value.to_string(),
-                    );
-                    self
-                }
-            }
-        )*
-
-        pub fn custom(mut self, key: String, value: &str) -> Self {
+      $(
+        paste! {
+          pub fn [<$variant:snake>](mut self, value: &str) -> Self {
             self.headers.insert(
-                HttpRequestHeaderKey::Custom(key).as_ref().to_string(),
-                value.to_string()
+              HttpRequestHeaderKey::$variant.as_ref().to_string(),
+              value.to_string(),
             );
             self
+          }
         }
+      )*
+
+      pub fn custom(mut self, key: String, value: &str) -> Self {
+        self.headers.insert(
+          HttpRequestHeaderKey::Custom(key).as_ref().to_string(),
+          value.to_string()
+        );
+        self
+      }
     };
-}
+  }
 
 impl HttpRequestHeaderBuilder {
   add_request_builder_headers!(
@@ -165,6 +119,62 @@ impl HttpRequestHeaderBuilder {
   }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, HeaderKey)]
+pub enum HttpResponseHeaderKey {
+  AccessControlAllowOrigin,
+  Connection,
+  ContentLength,
+  ContentType,
+  Custom(String),
+  KeepAlive,
+  LastModified,
+}
+
+#[derive(new)]
+pub struct HttpResponseHeaderBuilder {
+  #[new(default)]
+  headers: HashMap<String, String>,
+}
+
+macro_rules! add_response_builder_headers {
+    ($($variant:ident), * $(,)?) => {
+        $(
+          paste! {
+            pub fn [<$variant:snake>](mut self, value: &str) -> Self {
+              self.headers.insert(
+                HttpResponseHeaderKey::$variant.as_ref().to_string(),
+                value.to_string(),
+              );
+              self
+            }
+          }
+        )*
+
+        pub fn custom(mut self, key: String, value: &str) -> Self {
+          self.headers.insert(
+            HttpResponseHeaderKey::Custom(key).as_ref().to_string(),
+            value.to_string()
+          );
+          self
+        }
+    };
+}
+
+impl HttpResponseHeaderBuilder {
+  add_response_builder_headers!(
+    AccessControlAllowOrigin,
+    Connection,
+    ContentLength,
+    ContentType,
+    KeepAlive,
+    LastModified
+  );
+
+  fn build(self) -> HttpHeader {
+    HttpHeader::new(self.headers)
+  }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -177,28 +187,62 @@ mod tests {
     let http_header = HttpRequestHeaderBuilder::new()
       .accept("*/*")
       .accept_language("en-US,en;q=0.9,fr-CA;q=0.8,fr;q=0.7,ru;q=0.6,ro;q=0.5,el;q=0.4")
-      .accept_encoding("gzip, deflate, br, zstd")
-      .cache_control("no-cache, no-store")
-      .content_type("application/json")
-      .custom("Time-Delta-Millis".to_string(), 294.to_string().as_str())
-      .host("localhost")
-      .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-      .build();
+    .accept_encoding("gzip, deflate, br, zstd")
+    .cache_control("no-cache, no-store")
+    .content_type("application/json")
+    .custom("Time-Delta-Millis".to_string(), 294.to_string().as_str())
+    .host("localhost")
+    .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+  .build();
 
-    expect!(http_header.get("Accept")).to(be_some().value("*/*"));
-    expect!(http_header.get("Accept-Language"))
+    expect!(http_header.get(HttpRequestHeaderKey::Accept)).to(be_some().value("*/*"));
+    expect!(http_header.get(HttpRequestHeaderKey::AcceptLanguage))
       .to(be_some().value("en-US,en;q=0.9,fr-CA;q=0.8,fr;q=0.7,ru;q=0.6,ro;q=0.5,el;q=0.4"));
-    expect!(http_header.get("Accept-Encoding")).to(be_some().value("gzip, deflate, br, zstd"));
-    expect!(http_header.get("Cache-Control")).to(be_some().value("no-cache, no-store"));
-    expect!(http_header.get("Content-Type")).to(be_some().value("application/json"));
+    expect!(http_header.get(HttpRequestHeaderKey::AcceptEncoding))
+      .to(be_some().value("gzip, deflate, br, zstd"));
+    expect!(http_header.get(HttpRequestHeaderKey::CacheControl))
+      .to(be_some().value("no-cache, no-store"));
+    expect!(http_header.get(HttpRequestHeaderKey::ContentType))
+      .to(be_some().value("application/json"));
     expect!(http_header.get("Time-Delta-Millis")).to(be_some().value("294"));
-    expect!(http_header.get("Host")).to(be_some().value("localhost"));
-    expect!(http_header.get("User-Agent")).to(be_some().value("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"));
+    expect!(http_header.get(HttpRequestHeaderKey::Host)).to(be_some().value("localhost"));
+    expect!(http_header.get(HttpRequestHeaderKey::UserAgent)).to(be_some().value("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"));
 
     // Test a header that wasn't set
     expect!(http_header.get("Not-Set-Header")).to(be_none());
 
     // Test the number of headers
     expect!(http_header.into_iter().count()).to(be_equal_to(8));
+  }
+
+  #[rstest]
+  fn can_build_response_header() {
+    let http_header = HttpResponseHeaderBuilder::new()
+      .content_type("application/json")
+      .content_length("256")
+      .keep_alive("timeout=5, max=1000")
+      .access_control_allow_origin("*")
+      .connection("keep-alive")
+      .last_modified("Wed, 21 Oct 2015 07:28:00 GMT")
+      .custom("X-Custom-Header".to_string(), "custom value")
+      .build();
+
+    expect!(http_header.get(HttpResponseHeaderKey::ContentType))
+      .to(be_some().value("application/json"));
+    expect!(http_header.get(HttpResponseHeaderKey::ContentLength)).to(be_some().value("256"));
+    expect!(http_header.get(HttpResponseHeaderKey::KeepAlive))
+      .to(be_some().value("timeout=5, max=1000"));
+    expect!(http_header.get(HttpResponseHeaderKey::AccessControlAllowOrigin))
+      .to(be_some().value("*"));
+    expect!(http_header.get(HttpResponseHeaderKey::Connection)).to(be_some().value("keep-alive"));
+    expect!(http_header.get(HttpResponseHeaderKey::LastModified))
+      .to(be_some().value("Wed, 21 Oct 2015 07:28:00 GMT"));
+    expect!(http_header.get("X-Custom-Header")).to(be_some().value("custom value"));
+
+    // Test a header that wasn't set
+    expect!(http_header.get("Not-Set-Header")).to(be_none());
+
+    // Test the number of headers
+    expect!(http_header.into_iter().count()).to(be_equal_to(7));
   }
 }
