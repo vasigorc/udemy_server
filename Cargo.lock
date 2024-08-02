@@ -813,6 +813,7 @@ dependencies = [
  "derive-new",
  "expectest",
  "header_key_derive",
+ "lazy_static",
  "paste",
  "rstest",
  "rustfmt",

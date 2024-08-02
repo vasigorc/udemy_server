@@ -1,10 +1,11 @@
+use super::header::HttpHeader;
 use super::method::{Method, MethodError};
 use super::QueryString;
 use derive_getters::Getters;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::str::{self, Utf8Error};
+use std::str::{self, FromStr, Utf8Error};
 
 // lifetimes are designed to address the possibility of a danglinf reference
 #[derive(Debug, Getters)]
@@ -12,6 +13,7 @@ pub struct HttpRequest<'buf> {
   path: &'buf str,
   query_string: Option<QueryString<'buf>>,
   method: Method,
+  header: HttpHeader,
 }
 
 pub const HTTP1: &str = "HTTP/1.1";
@@ -22,9 +24,17 @@ impl<'buf> TryFrom<&'buf [u8]> for HttpRequest<'buf> {
 
   fn try_from(buf: &'buf [u8]) -> Result<HttpRequest<'buf>, Self::Error> {
     let request = str::from_utf8(buf)?;
-    let (method, request) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
-    let (mut path, request) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
-    let (protocol, _) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
+    let (method, request) = get_next_word(request).ok_or(ParseError::InvalidRequest(
+      "Method missing from HttpHeader missing!".to_string(),
+    ))?;
+    let (mut path, request) = get_next_word(request).ok_or(ParseError::InvalidRequest(
+      "Failed to etract path from HttpRequest!".to_string(),
+    ))?;
+    let (protocol, request) = get_next_word(request).ok_or(ParseError::InvalidRequest(
+      "Protocol missing in HTTP request!".to_string(),
+    ))?;
+    let request = request.trim_start_matches(|ch| ch == '\n');
+    let header = HttpHeader::from_str(request)?;
 
     if protocol != HTTP1 {
       return Err(ParseError::InvalidProtocol);
@@ -37,30 +47,31 @@ impl<'buf> TryFrom<&'buf [u8]> for HttpRequest<'buf> {
       path = &path[..i];
       query
     });
-    Ok(Self { path, query_string, method })
+    Ok(Self { path, query_string, method, header })
   }
 }
 
 fn get_next_word(request: &str) -> Option<(&str, &str)> {
   request
-    .find(|ch| ch == ' ' || ch == '\r')
+    .find(|ch| ch == ' ' || ch == '\r' || ch == '\n')
     .map(|matched_index| (&request[..matched_index], &request[matched_index + 1..]))
 }
 
+#[derive(PartialEq)]
 pub enum ParseError {
-  InvalidRequest,
+  InvalidRequest(String),
   InvalidEncoding,
   InvalidProtocol,
   InvalidMethodError,
 }
 
 impl ParseError {
-  fn message(&self) -> &str {
+  fn message(&self) -> String {
     match &self {
-      Self::InvalidRequest => "Invalid Request",
-      Self::InvalidEncoding => "Invalid Encoding",
-      Self::InvalidProtocol => "Invalid Protocol",
-      Self::InvalidMethodError => "Invalid Method Error",
+      Self::InvalidRequest(issue) => format!("Invalid Request: {}", issue),
+      Self::InvalidEncoding => "Invalid Encoding".to_string(),
+      Self::InvalidProtocol => "Invalid Protocol".to_string(),
+      Self::InvalidMethodError => "Invalid Method Error".to_string(),
     }
   }
 }
@@ -100,7 +111,7 @@ mod tests {
 
   #[fixture]
   fn valid_request_header() -> String {
-    "GET /home?name=none\rHTTP/1.1\r".to_string()
+    include_str!("../../tests/fixtures/valid_http_request.txt").to_string()
   }
 
   #[rstest]
@@ -108,9 +119,15 @@ mod tests {
     valid_request_header: String,
   ) -> Result<(), ParseError> {
     let request = &valid_request_header;
-    let (method, request) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
-    let (path, request) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
-    let (protocol, _) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
+    let (method, request) = get_next_word(request).ok_or(ParseError::InvalidRequest(
+      "Method missing from HTTP request!".to_string(),
+    ))?;
+    let (path, request) = get_next_word(request).ok_or(ParseError::InvalidRequest(
+      "Failed to etract path from HTTP request!".to_string(),
+    ))?;
+    let (protocol, _) = get_next_word(request).ok_or(ParseError::InvalidRequest(
+      "Protocol missing from HTTP request!".to_string(),
+    ))?;
     assert_eq!(method, "GET");
     assert_eq!(path, "/home?name=none");
     assert_eq!(protocol, HTTP1);
