@@ -3,9 +3,11 @@ use super::method::{Method, MethodError};
 use super::QueryString;
 use derive_getters::Getters;
 use std::convert::TryFrom;
-use std::error::Error;
+use std::error::{self, Error};
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::io;
 use std::str::{self, FromStr, Utf8Error};
+use thiserror::Error;
 
 // lifetimes are designed to address the possibility of a danglinf reference
 #[derive(Debug, Getters)]
@@ -55,6 +57,17 @@ fn get_next_word(request: &str) -> Option<(&str, &str)> {
   request
     .find(|ch| ch == ' ' || ch == '\r' || ch == '\n')
     .map(|matched_index| (&request[..matched_index], &request[matched_index + 1..]))
+}
+
+#[derive(Error, Debug)]
+pub enum FileError {
+  #[error("IO error: {0}")]
+  Io(#[from] io::Error),
+  #[error("TimeFormatError: {0}")]
+  TimeFormatError(#[from] time::error::Format),
+  #[cfg(test)]
+  #[error("TimeParseError: {0}")]
+  TimeParseError(#[from] time::error::Parse),
 }
 
 #[derive(PartialEq)]

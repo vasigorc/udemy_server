@@ -1,9 +1,15 @@
 use derive_new::new;
 use header_key_derive::HeaderKey;
+use mockall::automock;
 use paste::paste;
-use std::{collections::HashMap, str::FromStr};
+use std::{
+  collections::HashMap,
+  fs::{self, File},
+  str::FromStr,
+};
+use time::{format_description::well_known::Rfc2822, OffsetDateTime};
 
-use super::ParseError;
+use super::{request::FileError, ParseError};
 
 pub const MAX_HEADER_LENGTH_VALUE: usize = 250;
 pub const MAX_HEADERS_COUNT: usize = 100;
@@ -24,6 +30,47 @@ impl HttpHeader {
 
   pub fn remove<K: AsRef<str>>(&mut self, key: K) {
     self.headers.remove(key.as_ref());
+  }
+
+  pub fn html_response_header_for_file(
+    file_path: &str,
+    file_ops: &dyn FileOps,
+  ) -> Result<Self, FileError> {
+    let mut builder = HttpResponseHeaderBuilder::new();
+
+    let size = file_ops.get_file_size(file_path)?;
+    let last_modified = file_ops.get_file_last_modified_time(file_path)?;
+
+    builder.content_type("text/html; charset=utf-8");
+    builder.connection("keep-alive");
+    builder.keep_alive("timeout=5, max=1000");
+    builder.access_control_allow_origin("*");
+    builder.content_length(&size.to_string());
+    builder.last_modified(&last_modified);
+    builder.custom("X-Content-Type-Options".to_string(), "nosniff");
+    Ok(builder.build())
+  }
+}
+
+#[automock]
+pub trait FileOps {
+  fn get_file_size(&self, path: &str) -> Result<u64, FileError>;
+  fn get_file_last_modified_time(&self, path: &str) -> Result<String, FileError>;
+}
+
+pub struct ReadFileOps;
+
+impl FileOps for ReadFileOps {
+  fn get_file_size(&self, path: &str) -> Result<u64, FileError> {
+    let file = File::open(path)?;
+    Ok(file.metadata()?.len())
+  }
+
+  fn get_file_last_modified_time(&self, path: &str) -> Result<String, FileError> {
+    let metadata = fs::metadata(path)?;
+    let metadata_modified = metadata.modified()?;
+    let last_modified = OffsetDateTime::from(metadata_modified).format(&Rfc2822)?;
+    Ok(last_modified)
   }
 }
 
@@ -238,7 +285,7 @@ macro_rules! add_response_builder_headers {
     ($($variant:ident), * $(,)?) => {
         $(
           paste! {
-            pub fn [<$variant:snake>](mut self, value: &str) -> Self {
+            pub fn [<$variant:snake>](&mut self, value: &str) -> &mut Self {
               self.headers.insert(
                 HttpResponseHeaderKey::$variant.as_ref().to_string(),
                 value.to_string(),
@@ -248,7 +295,7 @@ macro_rules! add_response_builder_headers {
           }
         )*
 
-        pub fn custom(mut self, key: String, value: &str) -> Self {
+        pub fn custom(&mut self, key: String, value: &str) -> &mut Self {
           self.headers.insert(
             HttpResponseHeaderKey::Custom(key).as_ref().to_string(),
             value.to_string()
@@ -276,9 +323,13 @@ impl HttpResponseHeaderBuilder {
 #[cfg(test)]
 mod tests {
 
+  use std::io::Write;
+
   use super::*;
   use expectest::prelude::*;
+  use mockall::predicate::*;
   use rstest::*;
+  use tempfile::TempDir;
 
   #[fixture]
   fn valid_header() -> String {
@@ -320,15 +371,15 @@ mod tests {
 
   #[rstest]
   fn can_build_response_header() {
-    let http_header = HttpResponseHeaderBuilder::new()
-      .content_type("application/json")
-      .content_length("256")
-      .keep_alive("timeout=5, max=1000")
-      .access_control_allow_origin("*")
-      .connection("keep-alive")
-      .last_modified("Wed, 21 Oct 2015 07:28:00 GMT")
-      .custom("X-Custom-Header".to_string(), "custom value")
-      .build();
+    let mut builder = HttpResponseHeaderBuilder::new();
+    builder.content_type("application/json");
+    builder.content_length("256");
+    builder.keep_alive("timeout=5, max=1000");
+    builder.access_control_allow_origin("*");
+    builder.connection("keep-alive");
+    builder.last_modified("Wed, 21 Oct 2015 07:28:00 GMT");
+    builder.custom("X-Custom-Header".to_string(), "custom value");
+    let http_header = builder.build();
 
     expect!(http_header.get(HttpResponseHeaderKey::ContentType))
       .to(be_some().value("application/json"));
@@ -383,5 +434,65 @@ mod tests {
       expect!(header.get(HttpRequestHeaderKey::ContentType))
         .to(be_some().value("application/json"));
     }
+  }
+
+  #[rstest]
+  fn test_html_response_header_for_file() -> Result<(), FileError> {
+    // Create a temporary directory and file
+    let temp_dir = TempDir::new()?;
+    let temp_file_path = temp_dir.path().join("test.html");
+    let mut temp_file = File::create(&temp_file_path)?;
+    let content = "Test content";
+    temp_file.write_all(content.as_bytes())?;
+
+    // Get the header
+    let header =
+      HttpHeader::html_response_header_for_file(&temp_file_path.to_string_lossy(), &ReadFileOps)?;
+
+    // Test content length
+    expect!(header.get(HttpResponseHeaderKey::ContentLength))
+      .to(be_some().value(&content.len().to_string()));
+
+    // Test last modified
+    let last_modified = header.get(HttpResponseHeaderKey::LastModified).unwrap();
+    let parsed_time = OffsetDateTime::parse(last_modified, &Rfc2822)?;
+    let now = OffsetDateTime::now_utc();
+    expect!(now.unix_timestamp() - parsed_time.unix_timestamp()).to(be_less_than(5));
+    Ok(())
+  }
+
+  #[rstest]
+  fn test_html_response_header_for_file_failure() {
+    let mut mock_file_ops = MockFileOps::new();
+
+    // Mock file size calculation failure
+    mock_file_ops
+      .expect_get_file_size()
+      .with(eq("test.html"))
+      .times(1)
+      .returning(|_| {
+        Err(FileError::Io(std::io::Error::new(
+          std::io::ErrorKind::NotFound,
+          "File not found",
+        )))
+      });
+
+    let result = HttpHeader::html_response_header_for_file("test.html", &mock_file_ops);
+    expect!(result).to(be_err());
+
+    // Mock failure of last modified parsing
+    mock_file_ops.expect_get_file_size().returning(|_| Ok(100)); // Assume size succeeds
+    mock_file_ops
+      .expect_get_file_last_modified_time()
+      .with(eq("test.html"))
+      .times(1)
+      .returning(|_| {
+        Err(FileError::TimeParseError(
+          time::error::Parse::TryFromParsed(time::error::TryFromParsed::InsufficientInformation),
+        ))
+      });
+
+    let result = HttpHeader::html_response_header_for_file("test.html", &mock_file_ops);
+    expect!(result).to(be_err());
   }
 }
