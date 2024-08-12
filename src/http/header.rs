@@ -4,7 +4,9 @@ use mockall::automock;
 use paste::paste;
 use std::{
   collections::HashMap,
+  ffi::OsStr,
   fs::{self, File},
+  path::Path,
   str::FromStr,
 };
 use time::{format_description::well_known::Rfc2822, OffsetDateTime};
@@ -16,7 +18,7 @@ pub const MAX_HEADERS_COUNT: usize = 100;
 
 #[derive(Debug, new)]
 pub struct HttpHeader {
-  headers: HashMap<String, String>,
+  pub headers: HashMap<String, String>,
 }
 
 impl HttpHeader {
@@ -32,16 +34,33 @@ impl HttpHeader {
     self.headers.remove(key.as_ref());
   }
 
-  pub fn html_response_header_for_file(
-    file_path: &str,
+  pub fn iter(&self) -> std::collections::hash_map::Iter<String, String> {
+    self.headers.iter()
+  }
+
+  pub fn get_mime_type(path: &str) -> &'static str {
+    match Path::new(path).extension().and_then(OsStr::to_str) {
+      Some("html") => "text/html",
+      Some("css") => "text/css",
+      Some("js") => "application/javascript",
+      Some("png") => "image/png",
+      Some("jpg") | Some("jpeg") => "image/jpeg",
+      Some("ico") => "image/x-icon",
+      _ => "application/octet-stream",
+    }
+  }
+
+  pub fn html_response_header_for_file<P: AsRef<Path>>(
+    file_path: P,
     file_ops: &dyn FileOps,
   ) -> Result<Self, FileError> {
+    let path = file_path.as_ref();
     let mut builder = HttpResponseHeaderBuilder::new();
 
-    let size = file_ops.get_file_size(file_path)?;
-    let last_modified = file_ops.get_file_last_modified_time(file_path)?;
+    let size = file_ops.get_file_size(path)?;
+    let last_modified = file_ops.get_file_last_modified_time(path)?;
 
-    builder.content_type("text/html; charset=utf-8");
+    builder.content_type(Self::get_mime_type(&path.to_string_lossy()));
     builder.connection("keep-alive");
     builder.keep_alive("timeout=5, max=1000");
     builder.access_control_allow_origin("*");
@@ -54,19 +73,19 @@ impl HttpHeader {
 
 #[automock]
 pub trait FileOps {
-  fn get_file_size(&self, path: &str) -> Result<u64, FileError>;
-  fn get_file_last_modified_time(&self, path: &str) -> Result<String, FileError>;
+  fn get_file_size(&self, path: &Path) -> Result<u64, FileError>;
+  fn get_file_last_modified_time(&self, path: &Path) -> Result<String, FileError>;
 }
 
 pub struct ReadFileOps;
 
 impl FileOps for ReadFileOps {
-  fn get_file_size(&self, path: &str) -> Result<u64, FileError> {
+  fn get_file_size(&self, path: &Path) -> Result<u64, FileError> {
     let file = File::open(path)?;
     Ok(file.metadata()?.len())
   }
 
-  fn get_file_last_modified_time(&self, path: &str) -> Result<String, FileError> {
+  fn get_file_last_modified_time(&self, path: &Path) -> Result<String, FileError> {
     let metadata = fs::metadata(path)?;
     let metadata_modified = metadata.modified()?;
     let last_modified = OffsetDateTime::from(metadata_modified).format(&Rfc2822)?;
@@ -109,7 +128,6 @@ impl FromStr for HttpHeader {
 }
 
 fn parse_header(line: &str) -> Result<(HttpRequestHeaderKey, String), ParseError> {
-  println!("parsing line {}", line);
   let (key, value) = line
     .trim()
     .split_once(':')
@@ -133,36 +151,6 @@ fn parse_header(line: &str) -> Result<(HttpRequestHeaderKey, String), ParseError
     .unwrap_or_else(|| HttpRequestHeaderKey::Custom(key.clone()));
 
   Ok((header_key, value))
-}
-
-// iterator that consumes the struct
-impl IntoIterator for HttpHeader {
-  type Item = (String, String);
-  type IntoIter = std::collections::hash_map::IntoIter<String, String>;
-
-  fn into_iter(self) -> Self::IntoIter {
-    self.headers.into_iter()
-  }
-}
-
-// iterator for reference
-impl<'a> IntoIterator for &'a HttpHeader {
-  type Item = (&'a String, &'a String);
-  type IntoIter = std::collections::hash_map::Iter<'a, String, String>;
-
-  fn into_iter(self) -> Self::IntoIter {
-    self.headers.iter()
-  }
-}
-
-// iterator for mutable reference
-impl<'a> IntoIterator for &'a mut HttpHeader {
-  type Item = (&'a String, &'a mut String);
-  type IntoIter = std::collections::hash_map::IterMut<'a, String, String>;
-
-  fn into_iter(self) -> Self::IntoIter {
-    self.headers.iter_mut()
-  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, HeaderKey)]
@@ -366,7 +354,7 @@ mod tests {
     expect!(http_header.get("Not-Set-Header")).to(be_none());
 
     // Test the number of headers
-    expect!(http_header.into_iter().count()).to(be_equal_to(8));
+    expect!(http_header.iter().count()).to(be_equal_to(8));
   }
 
   #[rstest]
@@ -397,7 +385,7 @@ mod tests {
     expect!(http_header.get("Not-Set-Header")).to(be_none());
 
     // Test the number of headers
-    expect!(http_header.into_iter().count()).to(be_equal_to(7));
+    expect!(http_header.iter().count()).to(be_equal_to(7));
   }
 
   #[rstest]
@@ -446,8 +434,7 @@ mod tests {
     temp_file.write_all(content.as_bytes())?;
 
     // Get the header
-    let header =
-      HttpHeader::html_response_header_for_file(&temp_file_path.to_string_lossy(), &ReadFileOps)?;
+    let header = HttpHeader::html_response_header_for_file(&temp_file_path, &ReadFileOps)?;
 
     // Test content length
     expect!(header.get(HttpResponseHeaderKey::ContentLength))
@@ -468,7 +455,7 @@ mod tests {
     // Mock file size calculation failure
     mock_file_ops
       .expect_get_file_size()
-      .with(eq("test.html"))
+      .with(eq(Path::new("test.html")))
       .times(1)
       .returning(|_| {
         Err(FileError::Io(std::io::Error::new(
@@ -484,7 +471,7 @@ mod tests {
     mock_file_ops.expect_get_file_size().returning(|_| Ok(100)); // Assume size succeeds
     mock_file_ops
       .expect_get_file_last_modified_time()
-      .with(eq("test.html"))
+      .with(eq(Path::new("test.html")))
       .times(1)
       .returning(|_| {
         Err(FileError::TimeParseError(
@@ -494,5 +481,19 @@ mod tests {
 
     let result = HttpHeader::html_response_header_for_file("test.html", &mock_file_ops);
     expect!(result).to(be_err());
+  }
+
+  #[rstest]
+  #[case("test.html", "text/html")]
+  #[case("styles.css", "text/css")]
+  #[case("script.js", "application/javascript")]
+  #[case("image.png", "image/png")]
+  #[case("photo.jpg", "image/jpeg")]
+  #[case("photo.jpeg", "image/jpeg")]
+  #[case("favicon.ico", "image/x-icon")]
+  #[case("unknown.file", "application/octet-stream")]
+  #[case("noextension", "application/octet-stream")]
+  fn test_get_mime_type(#[case] input: &str, #[case] expected: &str) {
+    expect!(HttpHeader::get_mime_type(input)).to(be_equal_to(expected));
   }
 }

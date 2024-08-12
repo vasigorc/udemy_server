@@ -3,7 +3,7 @@ use super::method::{Method, MethodError};
 use super::QueryString;
 use derive_getters::Getters;
 use std::convert::TryFrom;
-use std::error::{self, Error};
+use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::io;
 use std::str::{self, FromStr, Utf8Error};
