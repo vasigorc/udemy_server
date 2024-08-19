@@ -3,9 +3,21 @@ name = "udemy_server"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [".", "header_key_derive"]
 
 [dependencies]
-derive-getters = "0.3.0"
+derive-getters = "0.5.0"
+derive-new = "0.6.0"
+paste = "1.0.15"
+header_key_derive = { path = "./header_key_derive" }
+lazy_static = "1.5.0"
+thiserror = "1.0.63"
+time = { version = "0.3.36", features = ["formatting", "parsing"] }
+mockall = "0.13.0"
+
+[dev-dependencies]
 expectest = "0.12.0"
-rstest = "0.19.0"
+rstest = "0.22.0"
+rustfmt = "0.10.0"
+tempfile = "3.12.0"

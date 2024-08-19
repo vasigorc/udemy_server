@@ -1,0 +1,8 @@
+max_width = 100
+tab_spaces = 2
+fn_call_width = 60
+chain_width = 60
+struct_lit_width = 60
+struct_variant_width = 60
+single_line_if_else_max_width = 60
+use_small_heuristics = "Max"
