@@ -15,6 +15,7 @@ lazy_static = "1.5.0"
 thiserror = "1.0.63"
 time = { version = "0.3.36", features = ["formatting", "parsing"] }
 mockall = "0.13.0"
+tokio = { version = "^1.40.0", features = ["full"] }
 
 [dev-dependencies]
 expectest = "0.12.0"
