@@ -1,16 +1,13 @@
 #![allow(dead_code)]
 
-use crate::http::{HttpRequest, HttpResponse, ParseError, StatusCode};
-use std::convert::TryFrom;
-use std::io::Read;
-use std::net::TcpListener;
+use tokio::io::AsyncReadExt;
 
-pub trait Hander {
-  fn handle_request(&mut self, request: &HttpRequest) -> HttpResponse;
-  fn handle_bad_request(&mut self, error: &ParseError) -> HttpResponse {
-    eprintln!("Failed to parse request: {}", error);
-    HttpResponse::empty_body(StatusCode::BadRequest)
-  }
+use crate::http::{HttpRequest, HttpResponse, StatusCode};
+use std::{convert::TryFrom, sync::Arc};
+use tokio::net::TcpListener;
+
+pub trait Handler: Send + Sync + 'static {
+  fn handle_request(&self, request: &HttpRequest) -> HttpResponse;
 }
 
 pub struct Server {
@@ -25,34 +22,39 @@ impl Server {
   }
 
   // method, requires an instance
-  pub fn run(self, mut handler: impl Hander) {
+  pub async fn run(self, handler: Arc<dyn Handler>) -> Result<(), Box<dyn std::error::Error>> {
     println!("Listening on {}", self.address);
 
-    let listener = TcpListener::bind(&self.address).unwrap();
+    let listener = TcpListener::bind(&self.address).await?;
 
     loop {
-      match listener.accept() {
-        Ok((mut stream, _)) => {
-          // 1KB here is just for demonstration's sake
-          let mut buffer = [0; 1024];
-          match stream.read(&mut buffer) {
-            Ok(_) => {
-              println!("Received a request: {}", String::from_utf8_lossy(&buffer));
+      let (mut stream, _) = listener.accept().await?;
 
-              let response = match HttpRequest::try_from(&buffer[..]) {
-                Ok(request) => handler.handle_request(&request),
-                Err(error) => handler.handle_bad_request(&error),
-              };
+      let handler = Arc::clone(&handler);
 
-              if let Err(e) = response.send(&mut stream) {
-                eprintln!("Failed to send response: {}", e);
+      tokio::spawn(async move {
+        // 1KB here is just for demonstration's sake
+        let mut buffer = [0; 1024];
+
+        match stream.read(&mut buffer).await {
+          Ok(_) => {
+            println!("Received a request: {}", String::from_utf8_lossy(&buffer));
+
+            let response = match HttpRequest::try_from(&buffer[..]) {
+              Ok(request) => handler.handle_request(&request),
+              Err(error) => {
+                eprintln!("Failed to parse request: {}", error);
+                HttpResponse::empty_body(StatusCode::BadRequest)
               }
+            };
+
+            if let Err(e) = response.send(&mut stream).await {
+              eprintln!("Failed to send response: {}", e);
             }
-            Err(error) => eprintln!("Failed to read from connection: {}", error),
           }
+          Err(error) => eprintln!("Failed to read from connection: {}", error),
         }
-        Err(error) => eprintln!("Failed to establish a connection: {}", error),
-      }
+      });
     }
   }
 }
