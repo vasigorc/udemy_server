@@ -1,6 +1,6 @@
-use tokio::net::TcpStream;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, Result as TokioResult};
+use tokio::net::TcpStream;
 
 use crate::{filesystem::FileSystem, http::request::HTTP1};
 
